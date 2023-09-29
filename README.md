@@ -4,5 +4,6 @@ This flow uses the Sungrow Modbus solution provided by mkaiser https://github.co
 
 A Solcast hobbyist account is used to get solar forecasts.
 
-I use the VS Code add-on to review and create the needed files in HA
+I use the VS Code add-on to review and create the needed files in HA.
 
+![](screengrab.png)
