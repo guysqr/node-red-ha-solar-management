@@ -169,7 +169,7 @@
     "type": "function",
     "z": "a22ceab4a91f8127",
     "name": "Charge/discharge/shutdown",
-    "func": "let today = new Date();\n// node.warn(\"hour now is \" + today.getHours());\n// node.warn(msg.current + \" and battery \" + msg.battery);\n// node.warn(msg.net_remaining+\";\"+msg.charge_required)\n\n// less than or equal to 0 decisions\nif (msg.current <= 0) {\n    if (msg.battery <= 98) {\n        // node.warn(\"FREE ELECTRICITY and battery <= 98\");\n        msg.decision = \"Free electricity from grid, so fast charging\";\n        msg.decisions.push(msg.decision)\n        return [msg,null,null]\n    }\n    //shut down inverter\n    else if (msg.current < -.03 && msg.forecast < 0) {\n        // node.warn(\"Being paid more than 3c to use from grid, and forecast is negative too\");\n        msg.decision = \"Being paid more than 3c to use from grid, so shutting down inverter\";\n        msg.decisions.push(msg.decision)\n        return [null, null, msg]\n    }\n}\n//very cheap power decisions\nelse if (msg.current <= .04 && msg.battery < 75 && today.getHours() > 12) {\n    // node.warn(\"very cheap charging and battery low for afternoon\")\n    msg.decision = \"After 1pm, very cheap grid, battery low, so force-charging\";\n    msg.decisions.push(msg.decision)\n    return [msg, null, null]\n}\nelse if (msg.current <= .04 && msg.battery < 30 && today.getHours() < 8) {\n    // node.warn(\"very cheap charging and battery low for morning\")\n    msg.decision = \"Before 7am, very cheap grid, battery low, so force-charging\";\n    msg.decisions.push(msg.decision)\n    return [msg, null, null]\n}\nelse if (msg.current <= .14 && msg.battery < 90 && msg.net_remaining < 1 && today.getHours() > 6 && today.getHours() < 16) {\n    // node.warn(\"Little generation left and price is cheap so force charging\");\n    msg.decision = \"Between 7am and 4pm, cheap grid, battery low, low generation remaining, so force-charging\";\n    msg.decisions.push(msg.decision)\n    return [msg, null, null]\n}\nelse if (msg.current < .18 && msg.battery < 80 && msg.net_remaining < msg.charge_required && today.getHours() > 6 && today.getHours() < 16) {\n    // node.warn(\"Not enough generation left to fully charge battery so force charging\");\n    msg.decision = \"Between 7am and 4pm, cheapish grid, battery below 80%, generation remaining not enough to charge battery, so force-charging\";\n    msg.decisions.push(msg.decision)\n    return [msg, null, null]\n}\n//\nelse {\n    // node.warn(\"Not worth charging battery from grid, not worth shutting down inverter\");\n    msg.decision = \"Not worth charging battery from grid, not worth shutting down inverter\";\n    msg.decisions.push(msg.decision)\n    return [null, msg, null]\n}\n",
+    "func": "let today = new Date();\n// node.warn(\"hour now is \" + today.getHours());\n// node.warn(msg.current + \" and battery \" + msg.battery);\n// node.warn(msg.net_remaining+\";\"+msg.charge_required)\n// node.warn(msg.forecast_obj)\nlet forecasts = msg.forecast_obj.attributes.forecasts;\nmsg.grid_forecasts = []\nmsg.fit_forecasts = []\n\nmsg.cheapest_grid_start = undefined\nmsg.best_fit_start = undefined\n\nmsg.time_blocks_grid = {}\nmsg.time_blocks_fit = {}\nmsg.cheapest_grid = 1000\nmsg.best_fit = -1000\nmsg.cheapest_grid_time = undefined\nmsg.best_fit_time = undefined\n\nfor (let i=0; i<forecasts.length-4; i++) {\n    msg.grid_forecasts.push(forecasts[i].per_kwh);\n    msg.fit_forecasts.push(forecasts[i].spot_per_kwh);\n    if (msg.cheapest_grid > forecasts[i].per_kwh) {\n        msg.cheapest_grid_time = forecasts[i].nem_date;\n        msg.cheapest_grid = forecasts[i].per_kwh;\n    }\n    if (msg.best_fit < forecasts[i].spot_per_kwh) {\n        msg.best_fit_time = forecasts[i].nem_date;\n        msg.best_fit = forecasts[i].spot_per_kwh;\n    }\n    msg.time_blocks_grid[forecasts[i].nem_date] = 0\n    msg.time_blocks_fit[forecasts[i].nem_date] = 0\n    for (let j=0; j<4; j++) {\n        msg.time_blocks_grid[forecasts[i].nem_date] += forecasts[i+j].per_kwh\n        msg.time_blocks_fit[forecasts[i].nem_date] += forecasts[i+j].spot_per_kwh\n    }\n    msg.time_blocks_grid[forecasts[i].nem_date] = Number((msg.time_blocks_grid[forecasts[i].nem_date]/6).toPrecision(2))\n    msg.time_blocks_fit[forecasts[i].nem_date] = Number((msg.time_blocks_fit[forecasts[i].nem_date]/6).toPrecision(2))\n}\nlet cheapest_grid_block = 1000\n\nfor (let block in msg.time_blocks_grid) {\n    let [hour,minute] = block.split('T')[1].split(\"+\")[0].split(\":\").slice(0, 2)\n    if (Number(hour) < 18 && msg.time_blocks_grid[block] < cheapest_grid_block) {\n        msg.cheapest_grid_start = [Number(hour),Number(minute)];\n        cheapest_grid_block = msg.time_blocks_grid[block]\n    }\n    else {\n        // node.warn(cheapest_grid_block + \" is cheaper than or same as \" + msg.time_blocks_grid[block])\n    }\n}\nlet best_fit_block = -1000\nfor (let block in msg.time_blocks_fit) {\n    let [hour,minute] = block.split('T')[1].split(\"+\")[0].split(\":\").slice(0, 2)\n    if (Number(hour) < 18 && msg.time_blocks_fit[block] > best_fit_block) {\n        msg.best_fit_start = [Number(hour),Number(minute)];\n        best_fit_block = msg.time_blocks_fit[block]\n    }\n}\n\n// node.warn(\"cheapest grid starting at \"+msg.cheapest_grid_start.join(\":\"));\n// node.warn(today.getHours() >= Number(msg.cheapest_grid_start[0]))\n// node.warn(today.getMinutes() >= Number(msg.cheapest_grid_start[1]))\nnode.warn(msg)\n// less than or equal to 0 decisions\nif (msg.current <= 0) {\n    if (msg.battery <= 98) {\n        // node.warn(\"FREE ELECTRICITY and battery <= 98\");\n        msg.decision = \"Free electricity from grid, so fast charging\";\n        msg.decisions.push(msg.decision)\n        return [msg,null,null]\n    }\n    //shut down inverter\n    else if (msg.current < -.03 && msg.forecast < 0) {\n        // node.warn(\"Being paid more than 3c to use from grid, and forecast is negative too\");\n        msg.decision = \"Being paid more than 3c to use from grid, so shutting down inverter\";\n        msg.decisions.push(msg.decision)\n        return [null, null, msg]\n    }\n}\n//very cheap power decisions\nelse if (msg.current <= .04 && msg.battery < 75 && today.getHours() > 12) {\n    // node.warn(\"very cheap charging and battery low for afternoon\")\n    msg.decision = \"After 1pm, very cheap grid, battery low, so force-charging\";\n    msg.decisions.push(msg.decision)\n    return [msg, null, null]\n}\nelse if (msg.current <= .04 && msg.battery < 30 && today.getHours() < 8) {\n    // node.warn(\"very cheap charging and battery low for morning\")\n    msg.decision = \"Before 7am, very cheap grid, battery low, so force-charging\";\n    msg.decisions.push(msg.decision)\n    return [msg, null, null]\n}\nelse if (msg.current < .10 && msg.battery < 100 && msg.net_remaining <= 0 && today.getHours() > 10 && today.getHours() < 16) {\n    // node.warn(\"Little generation left and price is cheap so force charging\");\n    msg.decision = \"Between 10am and 4pm, < 10c grid, battery < 100, low generation remaining, so force-charging\";\n    msg.decisions.push(msg.decision)\n    return [msg, null, null]\n}\n// else if (msg.current <= .15 && msg.battery < 85 && msg.net_remaining < 1 && today.getHours() > 14 && today.getHours() < 16) {\n//     // node.warn(\"Little generation left and price is cheap so force charging\");\n//     msg.decision = \"Between 2pm and 4pm, <= 15c grid, battery <85, low generation remaining, so force-charging\";\n//     msg.decisions.push(msg.decision)\n//     return [msg, null, null]1\n// }\n// msg.current < .10 && msg.battery < 100 && msg.net_remaining < 2 && \nelse if (msg.current < .10 && msg.battery < 100 && msg.net_remaining < 1 && today.getHours() >= Number(msg.cheapest_grid_start[0]) && today.getHours() < (Number(msg.cheapest_grid_start[0])+3) && today.getMinutes() >= Number(msg.cheapest_grid_start[1])) {\n    // node.warn(\"Not enough generation left to fully charge battery so force charging\");\n    msg.decision = \"In cheapest grid period, generation remaining not enough to charge battery, so force-charging\";\n    msg.decisions.push(msg.decision)\n    return [msg, null, null]\n}\n\nelse {\n    // node.warn(\"Not worth charging battery from grid, not worth shutting down inverter\");\n    msg.decision = \"Not worth charging battery from grid, not worth shutting down inverter\";\n    msg.decisions.push(msg.decision)\n    return [null, msg, null]\n}\n",
     "outputs": 3,
     "timeout": "",
     "noerr": 0,
@@ -283,6 +283,11 @@
         "propertyType": "msg",
         "value": "",
         "valueType": "entityState"
+    }, {
+        "property": "forecast_obj",
+        "propertyType": "msg",
+        "value": "",
+        "valueType": "entity"
     }],
     "for": "0",
     "forType": "num",
@@ -676,7 +681,7 @@
     "type": "function",
     "z": "a22ceab4a91f8127",
     "name": "Slow battery charge?",
-    "func": "\n\n// if FIT 0 or less, charge the battery at full speed\nif (msg.fit <= 0) {\n    // node.warn(\"No FIT benefit - \" + msg.fit + \"c - so charging at full speed\");\n    msg.decision = \"No feed-in benefit so charging at full speed\";\n    msg.decisions.push(msg.decision)\n    msg.battery_w = 8500;\n    return [msg, null]\n}\n// there is some feed in benefit, work out if worth slow-charging for\nelse if (msg.battery < 100 && msg.net_remaining < 1) {\n    // node.warn(\"FIT benefit - \" + msg.fit + \"c but less than 1kWh remaining generation so prioritising battery\");\n    msg.decision = \"Feed-in benefit but low generation remaining so charging at full speed\";\n    msg.decisions.push(msg.decision)\n    msg.battery_w = 8500;\n    return [null, msg]\n}\nelse if (msg.battery >= 30 && msg.net_remaining > msg.charge_required) {\n    // node.warn(\"FIT benefit - \" + msg.fit + \"c - so slow charging\");\n    msg.decision = \"Enough generation remaining so slow charging\";\n    msg.decisions.push(msg.decision)\n    msg.battery_w = 100;\n    return [null, msg]\n}\nelse if (msg.battery <= 15 && msg.net_remaining > msg.charge_required) {\n    // node.warn(\"FIT benefit but low battery - \" + msg.fit + \"c - so slow charging\");\n    msg.decision = \"Enough generation remaining but low battery so charging at 10% of PV\";\n    msg.decisions.push(msg.decision)\n    let slow_charge = Math.round((msg.dc_power_now * .1)/100) * 100;\n    msg.battery_w = slow_charge > 100 ? slow_charge : 100;\n    return [null, msg]\n}\n//if the battery is almost full, you can customise the logic here\nelse if (msg.battery > 95 && msg.expected_generation_remaining > msg.charge_required && msg.net_remaining > msg.charge_required) {\n    // node.warn(\"FIT benefit and battery almost full - \" + msg.fit + \"c - so slow charging\");\n    msg.decision = \"Enough generation remaining and battery almost full so charging at 10% of PV\";\n    msg.decisions.push(msg.decision)\n    let slow_charge = Math.round((msg.dc_power_now * .1)/100) * 100;\n    msg.battery_w = slow_charge > 100 ? slow_charge : 100;\n    return [null, msg]\n}\n//there is some feed-in benefti but we are favouring battery charging\nelse {\n    // node.warn(\"Else - \" + msg.fit + \"c - so fast charging\");\n    msg.decision = \"Feed-in benefit but fast charging anyway\";\n    msg.decisions.push(msg.decision)\n    return [msg, null]\n}\n",
+    "func": "let today = new Date()\n\n// if FIT 0 or less, charge the battery at full speed\nif (msg.fit <= 0) {\n    // node.warn(\"No FIT benefit - \" + msg.fit + \"c - so charging at full speed\");\n    msg.decision = \"No feed-in benefit so not limiting charge rate\";\n    msg.decisions.push(msg.decision)\n    msg.battery_w = 8500;\n    return [msg, null]\n}\n// there is some feed in benefit, work out if worth slow-charging for\nelse if (msg.battery < 100 && msg.net_remaining < 1) {\n    // node.warn(\"FIT benefit - \" + msg.fit + \"c but less than 1kWh remaining generation so prioritising battery\");\n    msg.decision = \"Feed-in benefit but low generation remaining so not limiting charge rate\";\n    msg.decisions.push(msg.decision)\n    msg.battery_w = 8500;\n    return [null, msg]\n}\nelse if (msg.battery >= 30 && msg.net_remaining > msg.charge_required && today.getHours() > 12 && today.getHours() < 17) {\n    // node.warn(\"FIT benefit - \" + msg.fit + \"c - so slow charging\");\n    msg.decision = \"Getting late in the day, FIT is probably going to be higher later so not limiting charge rate now\";\n    msg.decisions.push(msg.decision)\n    msg.battery_w = 8500;\n    return [null, msg]\n}\nelse if (msg.battery >= 30 && msg.net_remaining > msg.charge_required) {\n    // node.warn(\"FIT benefit - \" + msg.fit + \"c - so slow charging\");\n    msg.decision = \"Enough generation remaining so limiting charge rate\";\n    msg.decisions.push(msg.decision)\n    msg.battery_w = 100;\n    return [null, msg]\n}\nelse if (msg.battery <= 15 && msg.net_remaining > msg.charge_required) {\n    // node.warn(\"FIT benefit but low battery - \" + msg.fit + \"c - so slow charging\");\n    msg.decision = \"Enough generation remaining but low battery setting charge rate to 10% of PV\";\n    msg.decisions.push(msg.decision)\n    let slow_charge = Math.round((msg.dc_power_now * .1)/100) * 100;\n    msg.battery_w = slow_charge > 100 ? slow_charge : 100;\n    return [null, msg]\n}\n//if the battery is almost full, you can customise the logic here\nelse if (msg.battery > 95 && msg.expected_generation_remaining > msg.charge_required && msg.net_remaining > msg.charge_required) {\n    // node.warn(\"FIT benefit and battery almost full - \" + msg.fit + \"c - so slow charging\");\n    msg.decision = \"Enough generation remaining and battery almost full so setting charge rate to 10% of PV\";\n    msg.decisions.push(msg.decision)\n    let slow_charge = Math.round((msg.dc_power_now * .1)/100) * 100;\n    msg.battery_w = slow_charge > 100 ? slow_charge : 100;\n    return [null, msg]\n}\n//there is some feed-in benefti but we are favouring battery charging\nelse {\n    // node.warn(\"Else - \" + msg.fit + \"c - so fast charging\");\n    msg.battery_w = 8500;\n    msg.decision = \"Feed-in benefit but not limiting charge rate\";\n    msg.decisions.push(msg.decision)\n    return [msg, null]\n}\n",
     "outputs": 2,
     "timeout": "",
     "noerr": 0,
@@ -745,7 +750,7 @@
     "method": "GET",
     "ret": "txt",
     "paytoqs": "ignore",
-    "url": "https://api.solcast.com.au/rooftop_sites/<yoursite>/forecasts?format=json",
+    "url": "https://api.solcast.com.au/rooftop_sites/<yoursite1>/forecasts?format=json",
     "tls": "",
     "persist": false,
     "proxy": "",
@@ -892,7 +897,7 @@
     "method": "GET",
     "ret": "txt",
     "paytoqs": "ignore",
-    "url": "https://api.solcast.com.au/rooftop_sites/<yoursite>/estimated_actuals?format=json",
+    "url": "https://api.solcast.com.au/rooftop_sites/<yoursite1>/estimated_actuals?format=json",
     "tls": "",
     "persist": false,
     "proxy": "",
@@ -1803,7 +1808,7 @@
     "type": "function",
     "z": "a22ceab4a91f8127",
     "name": "Parse and Add",
-    "func": "msg.east = JSON.parse(msg.payload);\nmsg.totals = {}\nmsg.remaining_today = 0;\nmsg.remaining_by_hour = [];\nmsg.forecast_tomorrow = 0;\nmsg.forecast_tomorrow_by_hour = [];\nmsg.total_parts = [];\nmsg.forecast_periods = [];\nlet today = new Date();\nlet datestamp = today.getDate() + \"-\" + (today.getMonth()+1) + \"-\" + today.getFullYear();\nlet tomorrow = new Date(today.getFullYear(), today.getMonth(), today.getDate() + 1);\n// node.warn(today);\n// node.warn(tomorrow);\nlet max_items = Math.min(msg.east.forecasts.length, msg.north.forecasts.length);\nif (msg.east.forecasts[0].period_end === msg.north.forecasts[0].period_end) {\n    for (let i = 0; i < max_items; i++) {\n        let dp = msg.east.forecasts[i].period_end.split(/\\D/);\n        let dateObj = new Date(Date.UTC(dp[0], dp[1]-1, dp[2], dp[3], dp[4], dp[5]));\n        //set time back half an hour so the time is period start not end\n        dateObj.setTime(dateObj.getTime()-(30*60*1000))\n        let pv_estimate_east = (msg.east.forecasts[i].pv_estimate10 + msg.east.forecasts[i].pv_estimate90) / 2;\n        let pv_estimate_north = (msg.north.forecasts[i].pv_estimate10 + msg.north.forecasts[i].pv_estimate90) / 2;\n        let total = (pv_estimate_east + pv_estimate_north)/2;\n        if (today.getDate() === dateObj.getDate()) {\n            msg.remaining_today += total;\n            if (msg.remaining_by_hour[dateObj.getHours()]) {\n                msg.remaining_by_hour[dateObj.getHours()] += total;\n            }\n            else {\n                msg.remaining_by_hour[dateObj.getHours()] = total;\n            }\n            msg.total_parts.push(total);\n        }\n        if (tomorrow.getDate() === dateObj.getDate()) {\n            msg.forecast_tomorrow += total;\n            if (msg.forecast_tomorrow_by_hour[dateObj.getHours()]) {\n                msg.forecast_tomorrow_by_hour[dateObj.getHours()] += total;\n            }\n            else {\n                msg.forecast_tomorrow_by_hour[dateObj.getHours()] = total;\n            }\n            msg.forecast_periods.push(total);\n        }\n        msg.totals[msg.east.forecasts[i].period_end] = { total: total, date: dateObj };\n    }\n}\nelse {\n    node.error(\"files have different start times\", msg);\n}\nmsg.remaining_today = msg.remaining_today.toPrecision(3)\nmsg.forecast_tomorrow = msg.forecast_tomorrow.toPrecision(3)\nfor (let i = 0; i < msg.remaining_by_hour.length; i++) {\n    if (msg.remaining_by_hour[i] !== undefined) {\n        msg.remaining_by_hour[i] = msg.remaining_by_hour[i].toPrecision(2)\n    }\n}\nfor (let i = 0; i < msg.forecast_tomorrow_by_hour.length; i++) {\n    if (msg.forecast_tomorrow_by_hour[i] !== undefined) {\n        msg.forecast_tomorrow_by_hour[i] = msg.forecast_tomorrow_by_hour[i].toPrecision(2)\n    }\n}\nflow.set(\"remaining_today\", msg.remaining_by_hour);\nmsg.payload = {\n    \"forecast_today\": msg.remaining_today,\n    \"forecast_by_hour\": msg.remaining_by_hour,\n    \"forecast_tomorrow\": msg.forecast_tomorrow,\n    \"forecast_tomorrow_by_hour\": msg.forecast_tomorrow_by_hour\n};\nmsg.filename = \"/config/node-red/solcast/forecasts/\"+datestamp+\"/\" + msg.hour + \".json\"\nreturn msg;",
+    "func": "msg.east = JSON.parse(msg.payload);\nmsg.totals = {}\nmsg.remaining_today = 0;\nmsg.remaining_by_hour = [];\nmsg.forecast_tomorrow = 0;\nmsg.forecast_tomorrow_by_hour = [];\nmsg.total_parts = [];\nmsg.forecast_periods = [];\nlet today = new Date();\nlet datestamp = today.getDate() + \"-\" + (today.getMonth()+1) + \"-\" + today.getFullYear();\nlet tomorrow = new Date(today.getFullYear(), today.getMonth(), today.getDate() + 1);\n// node.warn(today);\n// node.warn(tomorrow);\nlet max_items = Math.min(msg.east.forecasts.length, msg.north.forecasts.length);\nlet peak_gen_time = new Date();\nlet peak_gen_kwh = 0;\nif (msg.east.forecasts[0].period_end === msg.north.forecasts[0].period_end) {\n    for (let i = 0; i < max_items; i++) {\n        let dp = msg.east.forecasts[i].period_end.split(/\\D/);\n        let dateObj = new Date(Date.UTC(dp[0], dp[1]-1, dp[2], dp[3], dp[4], dp[5]));\n        //set time back half an hour so the time is period start not end\n        dateObj.setTime(dateObj.getTime()-(30*60*1000))\n        let pv_estimate_east = (msg.east.forecasts[i].pv_estimate10 + msg.east.forecasts[i].pv_estimate90) / 2;\n        let pv_estimate_north = (msg.north.forecasts[i].pv_estimate10 + msg.north.forecasts[i].pv_estimate90) / 2;\n        let total = (pv_estimate_east + pv_estimate_north)/2;\n        if (today.getDate() === dateObj.getDate()) {\n            msg.remaining_today += total;\n            if (msg.remaining_by_hour[dateObj.getHours()]) {\n                msg.remaining_by_hour[dateObj.getHours()] += total;\n                if (peak_gen_kwh < msg.remaining_by_hour[dateObj.getHours()]) {\n                    peak_gen_kwh = msg.remaining_by_hour[dateObj.getHours()];\n                    peak_gen_time = dateObj;\n                }\n            }\n            else {\n                msg.remaining_by_hour[dateObj.getHours()] = total;\n            }\n            msg.total_parts.push(total);\n        }\n        if (tomorrow.getDate() === dateObj.getDate()) {\n            msg.forecast_tomorrow += total;\n            if (msg.forecast_tomorrow_by_hour[dateObj.getHours()]) {\n                msg.forecast_tomorrow_by_hour[dateObj.getHours()] += total;\n            }\n            else {\n                msg.forecast_tomorrow_by_hour[dateObj.getHours()] = total;\n            }\n            msg.forecast_periods.push(total);\n        }\n        msg.totals[msg.east.forecasts[i].period_end] = { total: total, date: dateObj };\n    }\n}\nelse {\n    node.error(\"files have different start times\", msg);\n}\nmsg.remaining_today = msg.remaining_today.toPrecision(3)\nmsg.forecast_tomorrow = msg.forecast_tomorrow.toPrecision(3)\nfor (let i = 0; i < msg.remaining_by_hour.length; i++) {\n    if (msg.remaining_by_hour[i] !== undefined) {\n        msg.remaining_by_hour[i] = msg.remaining_by_hour[i].toPrecision(2)\n    }\n}\nfor (let i = 0; i < msg.forecast_tomorrow_by_hour.length; i++) {\n    if (msg.forecast_tomorrow_by_hour[i] !== undefined) {\n        msg.forecast_tomorrow_by_hour[i] = msg.forecast_tomorrow_by_hour[i].toPrecision(2)\n    }\n}\nlet peak_gen_hm = peak_gen_time.getHours().toString().padStart(2, '0') + \":\" + peak_gen_time.getMinutes().toString().padStart(2, '0');\n\nflow.set(\"peak_gen_kwh\", peak_gen_kwh.toPrecision(3));\nflow.set(\"peak_gen_time\", peak_gen_hm);\nflow.set(\"remaining_today\", msg.remaining_by_hour);\nflow.set(\"expected_tomorrow\", msg.forecast_tomorrow);\nif (today.getHours() < 10) {\n    flow.set(\"forecast_pv_today\",msg.remaining_today)\n}\n\nmsg.payload = {\n    \"peak_gen_kwh\": peak_gen_kwh,\n    \"peak_gen_time\": peak_gen_time,\n    \"forecast_today\": msg.remaining_today,\n    \"forecast_by_hour\": msg.remaining_by_hour,\n    \"forecast_tomorrow\": msg.forecast_tomorrow,\n    \"forecast_tomorrow_by_hour\": msg.forecast_tomorrow_by_hour\n};\nmsg.filename = \"/config/node-red/solcast/forecasts/\"+datestamp+\"/\" + msg.hour + \".json\"\nreturn msg;",
     "outputs": 1,
     "timeout": "",
     "noerr": 0,
@@ -2201,7 +2206,7 @@
     "type": "function",
     "z": "a22ceab4a91f8127",
     "name": "Calculate Inputs",
-    "func": "let remaining_generation = flow.get(\"remaining_today\");\nlet baseline_consumption = flow.get(\"baseline_consumption\");\nlet today = new Date();\nlet current_hour = today.getHours();\nmsg.decisions = []\nmsg.expected_consumption_remaining = 0;\nmsg.expected_generation_remaining = 0;\nlet consumption_minus_generating_remaining = 0;\nfor (let hour in baseline_consumption) {\n    if (Number(hour) >= current_hour) {\n        let consumption_this_hour = (baseline_consumption[hour]/1000);\n        msg.expected_consumption_remaining += consumption_this_hour;\n        if (remaining_generation[hour]) {\n            msg.expected_generation_remaining += Number(remaining_generation[hour]);\n            consumption_minus_generating_remaining += Number(remaining_generation[hour]) - consumption_this_hour;\n        }\n    }\n}\n// node.warn(`baseline consumption remaining ${msg.expected_consumption_remaining.toPrecision(2)}kWh`);\n// node.warn(`generation remaining ${msg.expected_generation_remaining.toPrecision(2)}kWh`)\nmsg.net_remaining = (msg.expected_generation_remaining - msg.expected_consumption_remaining);\n// node.warn(`generation - consumption estimate ${msg.net_remaining.toPrecision(2)}kWh`);\nmsg.remaining_battery_kwh = (msg.battery/100) * 12.8;\n// node.warn(`battery remaining ${msg.remaining_battery_kwh.toPrecision(3)}kWh`);\nmsg.charge_required = 12.8 - msg.remaining_battery_kwh;\n// node.warn(`battery deficit ${msg.charge_required.toPrecision(3)}kWh`);\n// node.warn(`Net generation minus consumption: ${consumption_minus_generating_remaining.toPrecision(2)}kWh`);\nreturn msg;",
+    "func": "let remaining_generation = flow.get(\"remaining_today\");\nlet baseline_consumption = flow.get(\"baseline_consumption\");\nlet today = new Date();\nlet current_hour = today.getHours();\nmsg.decisions = []\nmsg.expected_consumption_remaining = 0;\nmsg.expected_generation_remaining = 0;\nlet consumption_minus_generating_remaining = 0;\nfor (let hour in baseline_consumption) {\n    if (Number(hour) >= current_hour) {\n        let consumption_this_hour = (baseline_consumption[hour] / 1000);\n        msg.expected_consumption_remaining += consumption_this_hour;\n        if (remaining_generation.hasOwnProperty(hour) && remaining_generation[hour]) {\n            msg.expected_generation_remaining += Number(remaining_generation[hour]);\n            consumption_minus_generating_remaining += Number(remaining_generation[hour]) - consumption_this_hour;\n        }\n    }\n}\n// node.warn(`baseline consumption remaining ${msg.expected_consumption_remaining.toPrecision(2)}kWh`);\n// node.warn(`generation remaining ${msg.expected_generation_remaining.toPrecision(2)}kWh`)\nmsg.net_remaining = (msg.expected_generation_remaining - msg.expected_consumption_remaining);\n// node.warn(`generation - consumption estimate ${msg.net_remaining.toPrecision(2)}kWh`);\nmsg.remaining_battery_kwh = (msg.battery / 100) * 12.8;\n// node.warn(`battery remaining ${msg.remaining_battery_kwh.toPrecision(3)}kWh`);\nmsg.charge_required = 12.8 - msg.remaining_battery_kwh;\n// node.warn(`battery deficit ${msg.charge_required.toPrecision(3)}kWh`);\n// node.warn(`Net generation minus consumption: ${consumption_minus_generating_remaining.toPrecision(2)}kWh`);\nreturn msg;",
     "outputs": 1,
     "timeout": 0,
     "noerr": 0,
@@ -2226,7 +2231,7 @@
     "targetType": "full",
     "statusVal": "",
     "statusType": "auto",
-    "x": 3090,
+    "x": 3110,
     "y": 380,
     "wires": []
 }, {
@@ -2234,16 +2239,17 @@
     "type": "function",
     "z": "a22ceab4a91f8127",
     "name": "Append to decision log",
-    "func": "let now = new Date();\nlet timestamp = now.getHours().toString().padStart(2, '0') + \":\" + now.getMinutes().toString().padStart(2, '0');\nlet datestamp = now.getDate().toString().padStart(2, '0') + \"-\" + (now.getMonth()+1).toString().padStart(2, '0') + \"-\" + now.getFullYear();\n\nmsg.filename = \"/config/node-red/decision_logs/\"+datestamp+\".csv\";\n\nlet data = [timestamp];\nif (msg.battery_w) {\n    data.push(\"Curtailment\")\n}\nelse {\n    data.push(\"Other\")\n} \ndata.push(msg.fit)\ndata.push(msg.curtailment_percentage)\ndata.push(msg.current)\ndata.push(msg.forecast)\ndata.push(msg.dc_power_now)\ndata.push(msg.load_now)\ndata.push(msg.expected_generation_remaining.toPrecision(4))\ndata.push(msg.expected_consumption_remaining.toPrecision(4))\ndata.push(msg.battery)\ndata.push(msg.net_remaining.toPrecision(4))\ndata.push(msg.remaining_battery_kwh.toPrecision(4))\ndata.push(msg.charge_required.toPrecision(3))\ndata.push(msg.battery_w)\ndata.push(msg.decisions.join(\" > \"))\n// data.push(msg.decision)\n\nmsg.payload = data.join(\"\\t\");\nreturn msg;",
-    "outputs": 1,
+    "func": "let msg2 = {}\nlet now = new Date();\nlet timestamp = now.getHours().toString().padStart(2, '0') + \":\" + now.getMinutes().toString().padStart(2, '0');\nlet datestamp = now.getDate().toString().padStart(2, '0') + \"-\" + (now.getMonth()+1).toString().padStart(2, '0') + \"-\" + now.getFullYear();\n\nmsg.filename = \"/config/node-red/decision_logs/\"+datestamp+\".csv\";\n\nlet cheap_grid_start = \"\";\nif (msg.cheapest_grid_start){\n    let peak_gen_kwh = flow.get(\"peak_gen_kwh\");\n    let peak_gen_time = flow.get(\"peak_gen_time\");\n    let forecast_pv_today = flow.get(\"forecast_pv_today\");\n    let remaining_pv = msg.net_remaining.toPrecision(3);\n    // let remaining_pv_label = remaining_pv > 0 ? \"Spare PV\" : \"Needed from Grid\";\n    let solar_emoji = \"😕\";\n    if (forecast_pv_today > 60) {\n        solar_emoji = \"🔆 🙌\";\n    }\n    else if (forecast_pv_today > 45) {\n        solar_emoji = \"⛅️ 🆗\";\n    }\n    else if (forecast_pv_today > 30) {\n        solar_emoji = \"☁️ 🙁\";\n    }\n    else {\n        solar_emoji = \"💩 😭\";\n    }\n    let expected_tomorrow = flow.get(\"expected_tomorrow\");\n    let tomorrow_solar_emoji = \"😕\";\n    if (expected_tomorrow > 60) {\n        tomorrow_solar_emoji = \"🔆 🙌\";\n    }\n    else if (expected_tomorrow > 45) {\n        tomorrow_solar_emoji = \"⛅️ 🆗\";\n    }\n    else if (expected_tomorrow > 30) {\n        tomorrow_solar_emoji = \"☁️ 🙁\";\n    }\n    else {\n        tomorrow_solar_emoji = \"💩 😭\";\n    }\n//${remaining_pv_label}: ${remaining_pv}kWh\\n\n    cheap_grid_start = msg.cheapest_grid_start[0].toString().padStart(2, '0') + \":\" + msg.cheapest_grid_start[1].toString().padStart(2, '0');\n    msg2 = { payload: `PV forecast: ${forecast_pv_today} kWh ${solar_emoji}\\n* Peak PV ${peak_gen_kwh} kWh at ${peak_gen_time}\\n* Cheapest grid ${msg.cheapest_grid}c around ${cheap_grid_start}\\nTomorrow's PV forecast: ${expected_tomorrow} kWh ${tomorrow_solar_emoji}` }\n}\n\nlet data = [timestamp];\nif (msg.battery_w) {\n    data.push(\"Curtailment\")\n}\nelse {\n    data.push(\"Other\")\n} \ndata.push(msg.fit)\ndata.push(msg.curtailment_percentage)\ndata.push(msg.current)\ndata.push(msg.forecast)\ndata.push(msg.dc_power_now)\ndata.push(msg.load_now)\ndata.push(msg.expected_generation_remaining.toPrecision(4))\ndata.push(msg.expected_consumption_remaining.toPrecision(4))\ndata.push(msg.battery)\ndata.push(msg.net_remaining.toPrecision(4))\ndata.push(msg.remaining_battery_kwh.toPrecision(4))\ndata.push(msg.charge_required.toPrecision(3))\ndata.push(msg.battery_w)\nif (msg.cheapest_grid_start){\n    data.push(cheap_grid_start)\n}\nelse {\n    data.push(\"\")\n}\ndata.push(msg.decisions.join(\" > \"))\n// data.push(msg.decision)\n\nmsg.payload = data.join(\"\\t\");\n\nreturn [msg2,msg];",
+    "outputs": 2,
     "timeout": 0,
     "noerr": 0,
     "initialize": "",
     "finalize": "",
     "libs": [],
     "x": 2670,
-    "y": 380,
+    "y": 360,
     "wires": [
+        ["816d7aa504549c19"],
         ["04540541e71b25ea"]
     ]
 }, {
@@ -2257,7 +2263,7 @@
     "createDir": true,
     "overwriteFile": "false",
     "encoding": "none",
-    "x": 2880,
+    "x": 2900,
     "y": 380,
     "wires": [
         ["48647c2c6d79945d"]
@@ -2269,7 +2275,7 @@
     "name": "Decision Logger",
     "links": ["6696e787e3440d2c", "8e740e78c6556459", "d6458d1b41a84321", "e144633243a2e77e", "347e0ae445145bab"],
     "x": 2505,
-    "y": 380,
+    "y": 360,
     "wires": [
         ["32d8aee4fa4fa0c0"]
     ]
@@ -2324,6 +2330,68 @@
     "y": 300,
     "wires": []
 }, {
+    "id": "48c8c062f00ae381",
+    "type": "twilio out",
+    "z": "a22ceab4a91f8127",
+    "twilio": "e9f5267f2022ae22",
+    "twilioType": "sms",
+    "url": "",
+    "number": "+61",
+    "name": "SMS person one",
+    "x": 3160,
+    "y": 180,
+    "wires": []
+}, {
+    "id": "ab9d7a07a06ccb76",
+    "type": "link in",
+    "z": "a22ceab4a91f8127",
+    "name": "Send SMS",
+    "links": ["816d7aa504549c19"],
+    "x": 2855,
+    "y": 220,
+    "wires": [
+        ["62aa7ad97751c374"]
+    ]
+}, {
+    "id": "62aa7ad97751c374",
+    "type": "rbe",
+    "z": "a22ceab4a91f8127",
+    "name": "RBE",
+    "func": "rbe",
+    "gap": "",
+    "start": "",
+    "inout": "out",
+    "septopics": false,
+    "property": "payload",
+    "topi": "payload",
+    "x": 2970,
+    "y": 220,
+    "wires": [
+        ["48c8c062f00ae381", "086dd22fb3f8bf43"]
+    ]
+}, {
+    "id": "816d7aa504549c19",
+    "type": "link out",
+    "z": "a22ceab4a91f8127",
+    "name": "link out 7",
+    "mode": "link",
+    "links": ["ab9d7a07a06ccb76"],
+    "x": 2855,
+    "y": 340,
+    "wires": []
+}, {
+    "id": "086dd22fb3f8bf43",
+    "type": "twilio out",
+    "z": "a22ceab4a91f8127",
+    "twilio": "e9f5267f2022ae22",
+    "twilioType": "sms",
+    "url": "",
+    "number": "+61",
+    "name": "SMS person 2",
+    "x": 3160,
+    "y": 260,
+    "wires": []
+}, {
     "id": "565eeeb7.e0f29",
     "type": "server",
     "name": "Home Assistant",
@@ -2366,4 +2434,10 @@
     "willMsg": {},
     "userProps": "",
     "sessionExpiry": ""
+}, {
+    "id": "e9f5267f2022ae22",
+    "type": "twilio-api",
+    "name": "",
+    "sid": "",
+    "from": ""
 }]
